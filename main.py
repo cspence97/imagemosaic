@@ -1,6 +1,8 @@
 import math
 import os
 import random
+import concurrent.futures
+import time
 
 import GetAlbums
 from PIL import Image
@@ -10,6 +12,7 @@ try:
     imagelist = joblib.load("imagelist.jblib")
 except FileNotFoundError:
     imagelist = {}
+
 
 def get_average(image):
     img = Image.open("images/" + image).convert("RGB")
@@ -35,10 +38,10 @@ def get_average(image):
 
 
 def find_distance(a, b):
-    return math.sqrt(((a[0] - b[0])**2) + ((a[1] - b[1])**2) + ((a[2]-b[2])**2))
+    return math.sqrt(((a[0] - b[0]) ** 2) + ((a[1] - b[1]) ** 2) + ((a[2] - b[2]) ** 2))
 
 
-#pls use square image
+# pls use square image
 def chunk_image(image, resolution):
     img = Image.open(image).convert("RGB")
     img = img.resize((resolution, resolution), Image.ANTIALIAS)
@@ -62,7 +65,37 @@ def downscale_images():
             img.save("images/" + image, "JPEG")
 
 
+# Finds album matches in order from top left to bottom right.  results have cool effect, very accurate on left, not so much on right.  fades in betweenallCoords = [[(f, q) for f in range(width) for q in range(height)]]
+#     allCoords
 def compare_vals(img, imgdict):
+    width = len(img)
+    height = len(img[0])
+    newimg = [[[None] for _ in range(width)] for _ in range(height)]
+    for x in range(width):
+        for y in range(height):
+            newimg[x][y] = min(imgdict, key=lambda z: find_distance(imgdict[z], img[x][y]))
+            imgdict.pop(newimg[x][y])
+            print("Found image for X: " + str(x) + " Y: " + str(y))
+            print("Len of imgdict " + str(len(imgdict)))
+    return newimg
+
+
+# Finds album matches for random pixels.  Results are fuzzier, however more consistent throughout
+def rand_compare_vals(img, imgdict):
+    width = len(img)
+    height = len(img[0])
+    newimg = [[[None] for _ in range(width)] for _ in range(height)]
+
+    allCoords = [(f, q) for f in range(width) for q in range(height)]
+    random.shuffle(allCoords)
+    for i in allCoords:
+        newimg[i[0]][i[1]] = min(imgdict, key=lambda z: find_distance(imgdict[z], img[i[0]][i[1]]))
+        imgdict.pop(newimg[i[0]][i[1]])
+        print("Found image for X: " + str(i[0]) + ", " + str(i[1]))
+    return newimg
+
+# different pixel orders for different effects
+def diagonal_compare_vals(img, imgdict):
     width = len(img)
     height = len(img[0])
     print("type of imglist " + str(type(imgdict)))
@@ -70,51 +103,62 @@ def compare_vals(img, imgdict):
     newimg = [[[None] for _ in range(width)] for _ in range(height)]
     print("size: " + str(len(newimg)) + ", " + str(len(newimg[0])))
 
-    xList = [i for i in range(width)]
-    yList = [i for i in range(height)]
-    print(len(xList), len(yList))
-    random.shuffle(xList)
-    random.shuffle(yList)
-    finnedCoords = []
-    a = random.randint(0, width-1)
-    b = random.randint(0, height-1)
-    finnedCoords.append((a, b))
-    print("Our starting coordinate: " + str(a) + ", " + str(b))
-    print("Color found is " + str(img[a][b]))
-    for x in range(width*height):
-        dist = None
-        file = None
-        for i in imgdict:
-            distance = find_distance(img[a][b], imgdict[i])
-            if not dist:
-                dist = distance
-                file = i
-            elif distance < dist:
-                dist = distance
-                file = i
+    # print("Our starting coordinate: " + str(a) + ", " + str(b))
+    # print("Color found is " + str(img[a][b]))
+    for k in range(width - 1):
+        for j in range(k):
+            i = k - j
+            dist = None
+            file = None
+            for q in imgdict:
+                distance = find_distance(img[i][j], imgdict[q])
+                if not dist:
+                    dist = distance
+                    file = q
+                elif distance < dist:
+                    dist = distance
+                    file = q
+            newimg[i][j] = file
+            print("Type for file is " + str(type(file)))
+            print("Image found for pixel: " + str(i) + ", " + str(j))
+            try:
+                imgdict.pop(file)
+            except KeyError:
+                print("we stressin over distance: " + str(dist))
+                exit()
+    for k in range(width - 2):
+        k = width - 2 - k
+        for j in range(k):
+            i = k - j
+            dist = None
+            file = None
+            for q in imgdict:
+                distance = find_distance(img[width - j - 1][width - i - 1], imgdict[q])
+                if not dist:
+                    dist = distance
+                    file = q
+                elif distance < dist:
+                    dist = distance
+                    file = q
+            newimg[width - j - 1][width - i - 1] = file
+            print("I promise we're not skipping this section")
+            try:
+                imgdict.pop(file)
+            except KeyError:
+                print("we stressin over distance: " + str(dist))
+                exit()
 
-        newimg[a][b] = file
-        while True:
-            if len(finnedCoords) == width*height:
-                break
-            a = random.randint(0, width-1)
-            b = random.randint(0, height-1)
-            if(a, b) not in finnedCoords:
-                finnedCoords.append((a, b))
-                break
-        try:
-            imgdict.pop(file)
-        except KeyError:
-            print("we stressin over distance: " + str(dist))
-            exit()
+    joblib.dump(newimg, "orderednewimgvals.jblib")
     return newimg
 
 
+# Creates the new version of image.  Creates empty photo and pastes images.  Must have images assigned in vals matrix
 def create_new_image(vals):
-    newimg = Image.new("RGB", (150000, 150000))
-
+    print("We made it to starting the new image")
+    newimg = Image.new("RGB", (15100, 15100))
     x_off = 0
     print("Length of x" + str(len(vals)))
+    # Iterate over image and paste each image in next slot
     for x in range(len(vals)):
         y_off = 0
         for y in range(len(vals[x])):
@@ -122,10 +166,12 @@ def create_new_image(vals):
             newimg.paste(Image.open("images/" + vals[x][y]), (x_off, y_off))
             y_off += 100
         x_off += 100
+    # Show image and save it as new file
     newimg.show()
+    newimg.save("final.jpg", "JPEG")
 
 
-
+# Converts RGB to LAB  taken from Adobe cookbook
 def rgb2lab(inputColor):
     if not inputColor:
         return
@@ -180,7 +226,7 @@ def rgb2lab(inputColor):
     return Lab
 
 
-#
+# Gets LAB values for all images and stores them to imagelist
 def get_images_info():
     global imagelist
     for root, dirs, files in os.walk("images/"):
@@ -226,11 +272,21 @@ playlists = [
 ]
 
 # Load all playlists, download images then dump info list to a file
-#imglist = GetAlbums.get_albums(playlists=playlists)
-#joblib.dump(imglist, imagelist.jblib)
-#exit()
-get_images_info()
-#downscale_images()
-create_new_image(compare_vals(chunk_image("desire.jpg", 150), imagelist))
-# Only do this when need to update imagelist
+# imglist = GetAlbums.get_albums(playlists=playlists)
+# joblib.dump(imglist, imagelist.jblib)
+# exit()
+# get_images_info()
+# downscale_images()
+
+# ordered_vals = diagonal_compare_vals(chunk_image("Mike.jpg", 151), imagelist)
+
+start = time.perf_counter()
+ordered_vals = rand_compare_vals(chunk_image("kitty.jpg", 151), imagelist)
+orderedtime = time.perf_counter() - start
+start = time.perf_counter()
+#ordered_vals = compare_vals(chunk_image("kitty.jpg", 151), imagelist)
+lambdatime = time.perf_counter() - start
+print("ordered time took: " + str(orderedtime))
+print("new time took: " + str(lambdatime))
+create_new_image(vals=ordered_vals)
 
