@@ -1,19 +1,20 @@
 import math
 import os
 import random
-import concurrent.futures
 import time
 
 import GetAlbums
 from PIL import Image
 import joblib
 
+# Load our megalist because 23,000 pictures takes a long time for python to download every time
 try:
     imagelist = joblib.load("imagelist.jblib")
 except FileNotFoundError:
     imagelist = {}
 
 
+# Averages our image's rgb value.  Input is file name output is (r,g,b)
 def get_average(image):
     img = Image.open("images/" + image).convert("RGB")
     r, g, b = 0, 0, 0
@@ -22,26 +23,21 @@ def get_average(image):
     pixel_values = list(img.getdata())
     for x in range(width):
         for y in range(height):
-            try:
-                r += pixel_values[width * y + x][0]
-                g += pixel_values[width * y + x][1]
-                b += pixel_values[width * y + x][2]
-            except TypeError:
-                img.show()
-                print(type(pixel_values[width * y + x]))
-                print(type(r))
-                return
+            r += pixel_values[width * y + x][0]
+            g += pixel_values[width * y + x][1]
+            b += pixel_values[width * y + x][2]
     r //= size
     g //= size
     b //= size
     return r, g, b
 
 
+# Vector distance function
 def find_distance(a, b):
     return math.sqrt(((a[0] - b[0]) ** 2) + ((a[1] - b[1]) ** 2) + ((a[2] - b[2]) ** 2))
 
 
-# pls use square image
+# pls use square image.  Resizes desired image and returns matrix of new pixels colors in LAB format
 def chunk_image(image, resolution):
     img = Image.open(image).convert("RGB")
     img = img.resize((resolution, resolution), Image.ANTIALIAS)
@@ -65,18 +61,18 @@ def downscale_images():
             img.save("images/" + image, "JPEG")
 
 
-# Finds album matches in order from top left to bottom right.  results have cool effect, very accurate on left, not so much on right.  fades in betweenallCoords = [[(f, q) for f in range(width) for q in range(height)]]
-#     allCoords
+# Finds album matches in order from top left to bottom right.
+# results have cool effect, very accurate on left, not so much on right.  fades in between
 def compare_vals(img, imgdict):
     width = len(img)
     height = len(img[0])
     newimg = [[[None] for _ in range(width)] for _ in range(height)]
+    # Iterate across every pixel and return closest colored image that hasn't been used
     for x in range(width):
         for y in range(height):
             newimg[x][y] = min(imgdict, key=lambda z: find_distance(imgdict[z], img[x][y]))
             imgdict.pop(newimg[x][y])
             print("Found image for X: " + str(x) + " Y: " + str(y))
-            print("Len of imgdict " + str(len(imgdict)))
     return newimg
 
 
@@ -85,26 +81,25 @@ def rand_compare_vals(img, imgdict):
     width = len(img)
     height = len(img[0])
     newimg = [[[None] for _ in range(width)] for _ in range(height)]
-
+    # create a list of all pixel coordinates and shuffle them
     allCoords = [(f, q) for f in range(width) for q in range(height)]
     random.shuffle(allCoords)
+    # iterate through shuffled coordinates and find closest colored image not been used
     for i in allCoords:
         newimg[i[0]][i[1]] = min(imgdict, key=lambda z: find_distance(imgdict[z], img[i[0]][i[1]]))
         imgdict.pop(newimg[i[0]][i[1]])
         print("Found image for X: " + str(i[0]) + ", " + str(i[1]))
     return newimg
 
+
 # different pixel orders for different effects
+# Broken currently but fixing proll
 def diagonal_compare_vals(img, imgdict):
     width = len(img)
     height = len(img[0])
-    print("type of imglist " + str(type(imgdict)))
-
     newimg = [[[None] for _ in range(width)] for _ in range(height)]
     print("size: " + str(len(newimg)) + ", " + str(len(newimg[0])))
 
-    # print("Our starting coordinate: " + str(a) + ", " + str(b))
-    # print("Color found is " + str(img[a][b]))
     for k in range(width - 1):
         for j in range(k):
             i = k - j
@@ -119,13 +114,13 @@ def diagonal_compare_vals(img, imgdict):
                     dist = distance
                     file = q
             newimg[i][j] = file
-            print("Type for file is " + str(type(file)))
             print("Image found for pixel: " + str(i) + ", " + str(j))
             try:
                 imgdict.pop(file)
             except KeyError:
                 print("we stressin over distance: " + str(dist))
                 exit()
+
     for k in range(width - 2):
         k = width - 2 - k
         for j in range(k):
@@ -141,23 +136,20 @@ def diagonal_compare_vals(img, imgdict):
                     dist = distance
                     file = q
             newimg[width - j - 1][width - i - 1] = file
-            print("I promise we're not skipping this section")
+            print("Image found for pixel: " + str(width-j-1) + ", " + str(width-i-1))
             try:
                 imgdict.pop(file)
             except KeyError:
                 print("we stressin over distance: " + str(dist))
                 exit()
-
-    joblib.dump(newimg, "orderednewimgvals.jblib")
     return newimg
 
 
 # Creates the new version of image.  Creates empty photo and pastes images.  Must have images assigned in vals matrix
 def create_new_image(vals):
     print("We made it to starting the new image")
-    newimg = Image.new("RGB", (15100, 15100))
+    newimg = Image.new("RGB", (len(vals)*100, len(vals[0])*100))
     x_off = 0
-    print("Length of x" + str(len(vals)))
     # Iterate over image and paste each image in next slot
     for x in range(len(vals)):
         y_off = 0
@@ -168,7 +160,7 @@ def create_new_image(vals):
         x_off += 100
     # Show image and save it as new file
     newimg.show()
-    newimg.save("final.jpg", "JPEG")
+    newimg.save("final.png", "PNG")
 
 
 # Converts RGB to LAB  taken from Adobe cookbook
