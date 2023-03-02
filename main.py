@@ -1,7 +1,6 @@
 import math
 import os
 import random
-import time
 
 import GetAlbums
 from PIL import Image
@@ -14,15 +13,15 @@ except FileNotFoundError:
     imagelist = {}
 
 
-# Averages our image's rgb value.  Input is file name output is (r,g,b)
+# Averages all the pixels' colors in an image.  Input is file name output is (r,g,b)
 def get_average(image):
     img = Image.open("images/" + image).convert("RGB")
     r, g, b = 0, 0, 0
     width, height = img.size
     size = width * height
     pixel_values = list(img.getdata())
-    for x in range(width):
-        for y in range(height):
+    for y in range(height):
+        for x in range(width):
             r += pixel_values[width * y + x][0]
             g += pixel_values[width * y + x][1]
             b += pixel_values[width * y + x][2]
@@ -45,34 +44,27 @@ def chunk_image(image, resolution):
     pixel_values = img.getdata()
     width, height = img.size
 
-    for x in range(width):
-        for y in range(height):
+    for y in range(height):
+        for x in range(width):
             img_vals[x][y] = rgb2lab(pixel_values[width * y + x])
 
     return img_vals
 
 
-# Downscale images in images folder so we get 100x100 versions.  still visible and not necessarily humongous file
-def downscale_images():
-    for root, dirs, files in os.walk("largeimages/"):
-        for image in files:
-            img = Image.open("largeimages/" + image).convert("RGB")
-            img = img.resize((100, 100), Image.ANTIALIAS)
-            img.save("images/" + image, "JPEG")
-
-
 # Finds album matches in order from top left to bottom right.
-# results have cool effect, very accurate on left, not so much on right.  fades in between
-def compare_vals(img, imgdict):
+# results have cool effect, very accurate on top to not so much on bottom.
+# Uses repeating images for unique_imgs=False that makes for a cool 3d textured look
+def compare_vals(img, imgdict, unique_imgs=True):
     width = len(img)
     height = len(img[0])
     newimg = [[[None] for _ in range(width)] for _ in range(height)]
+
     # Iterate across every pixel and return closest colored image that hasn't been used
-    for x in range(width):
-        for y in range(height):
+    for y in range(height):
+        for x in range(width):
             newimg[x][y] = min(imgdict, key=lambda z: find_distance(imgdict[z], img[x][y]))
-            imgdict.pop(newimg[x][y])
-            print("Found image for X: " + str(x) + " Y: " + str(y))
+            if unique_imgs:
+                imgdict.pop(newimg[x][y])
     return newimg
 
 
@@ -88,21 +80,68 @@ def rand_compare_vals(img, imgdict):
     for i in allCoords:
         newimg[i[0]][i[1]] = min(imgdict, key=lambda z: find_distance(imgdict[z], img[i[0]][i[1]]))
         imgdict.pop(newimg[i[0]][i[1]])
-        print("Found image for X: " + str(i[0]) + ", " + str(i[1]))
     return newimg
 
 
-# different pixel orders for different effects
-# Broken currently but fixing proll
+# matches pixels in an outside to inside spiral
+def spiral_compare_vals(img, imgdict):
+    width = len(img)
+    height = len(img[0])
+    newimg = [[[None] for _ in range(width)] for _ in range(height)]
+
+    # Counter variables to keep track of rows and columns already completed
+    row = 0
+    rowEnd = width
+    col = 0
+    colEnd = height
+    while row <= rowEnd and col <= colEnd:
+
+        # Right
+        for i in range(colEnd):
+            if i < col:
+                continue
+            newimg[row][i] = min(imgdict, key=lambda z: find_distance(imgdict[z], img[row][i]))
+            imgdict.pop(newimg[row][i])
+        row += 1
+
+        # Down
+        for i in range(rowEnd):
+            if i < row:
+                continue
+            newimg[i][colEnd - 1] = min(imgdict, key=lambda z: find_distance(imgdict[z], img[i][colEnd - 1]))
+            imgdict.pop(newimg[i][colEnd - 1])
+        colEnd -= 1
+
+        # Left
+        if row <= rowEnd:
+            for i in reversed(range(colEnd)):
+                if i < col:
+                    continue
+                newimg[rowEnd - 1][i] = min(imgdict, key=lambda z: find_distance(imgdict[z], img[rowEnd - 1][i]))
+                imgdict.pop(newimg[rowEnd - 1][i])
+        rowEnd -= 1
+
+        # Up
+        if col <= colEnd:
+            for i in reversed(range(rowEnd)):
+                if i < row:
+                    continue
+                newimg[i][col] = min(imgdict, key=lambda z: find_distance(imgdict[z], img[i][col]))
+                imgdict.pop(newimg[i][col])
+        col += 1
+    return newimg
+
+
+# diagonally finds matches, top left half first bottom right half second
 def diagonal_compare_vals(img, imgdict):
     width = len(img)
     height = len(img[0])
     newimg = [[[None] for _ in range(width)] for _ in range(height)]
     print("size: " + str(len(newimg)) + ", " + str(len(newimg[0])))
 
-    for k in range(width - 1):
+    for k in range(width):
         for j in range(k):
-            i = k - j
+            i = k - j - 1
             dist = None
             file = None
             for q in imgdict:
@@ -114,17 +153,12 @@ def diagonal_compare_vals(img, imgdict):
                     dist = distance
                     file = q
             newimg[i][j] = file
-            print("Image found for pixel: " + str(i) + ", " + str(j))
-            try:
-                imgdict.pop(file)
-            except KeyError:
-                print("we stressin over distance: " + str(dist))
-                exit()
+            imgdict.pop(file)
 
-    for k in range(width - 2):
-        k = width - 2 - k
+    for k in range(width):
+        k = width - k
         for j in range(k):
-            i = k - j
+            i = k - j - 1
             dist = None
             file = None
             for q in imgdict:
@@ -136,26 +170,24 @@ def diagonal_compare_vals(img, imgdict):
                     dist = distance
                     file = q
             newimg[width - j - 1][width - i - 1] = file
-            print("Image found for pixel: " + str(width-j-1) + ", " + str(width-i-1))
-            try:
-                imgdict.pop(file)
-            except KeyError:
-                print("we stressin over distance: " + str(dist))
-                exit()
+            imgdict.pop(file)
     return newimg
 
 
 # Creates the new version of image.  Creates empty photo and pastes images.  Must have images assigned in vals matrix
 def create_new_image(vals):
     print("We made it to starting the new image")
-    newimg = Image.new("RGB", (len(vals)*100, len(vals[0])*100))
+    newimg = Image.new("RGB", (len(vals) * 100, len(vals[0]) * 100))
     x_off = 0
     # Iterate over image and paste each image in next slot
     for x in range(len(vals)):
         y_off = 0
         for y in range(len(vals[x])):
             print("Pasting image at x:" + str(x_off) + ", y: " + str(y_off))
-            newimg.paste(Image.open("images/" + vals[x][y]), (x_off, y_off))
+            try:
+                newimg.paste(Image.open("images/" + vals[x][y]), (x_off, y_off))
+            except TypeError:
+                print(vals[x][y])
             y_off += 100
         x_off += 100
     # Show image and save it as new file
@@ -265,20 +297,12 @@ playlists = [
 
 # Load all playlists, download images then dump info list to a file
 # imglist = GetAlbums.get_albums(playlists=playlists)
-# joblib.dump(imglist, imagelist.jblib)
-# exit()
 # get_images_info()
-# downscale_images()
 
-# ordered_vals = diagonal_compare_vals(chunk_image("Mike.jpg", 151), imagelist)
 
-start = time.perf_counter()
-ordered_vals = rand_compare_vals(chunk_image("kitty.jpg", 151), imagelist)
-orderedtime = time.perf_counter() - start
-start = time.perf_counter()
-#ordered_vals = compare_vals(chunk_image("kitty.jpg", 151), imagelist)
-lambdatime = time.perf_counter() - start
-print("ordered time took: " + str(orderedtime))
-print("new time took: " + str(lambdatime))
+# ordered_vals = compare_vals(chunk_image("Ella.jpg", 151), imagelist)
+# ordered_vals = rand_compare_vals(chunk_image("Ella.jpg", 151), imagelist)
+# ordered_vals = spiral_compare_vals(chunk_image("Ella.jpg", 151), imagelist)
+ordered_vals = diagonal_compare_vals(chunk_image("Ella.jpg", 151), imagelist)
+
 create_new_image(vals=ordered_vals)
-
