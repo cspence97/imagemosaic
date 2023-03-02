@@ -6,12 +6,6 @@ import GetAlbums
 from PIL import Image
 import joblib
 
-# Load our megalist because 23,000 pictures takes a long time for python to download every time
-try:
-    imagelist = joblib.load("imagelist.jblib")
-except FileNotFoundError:
-    imagelist = {}
-
 
 # Averages all the pixels' colors in an image.  Input is file name output is (r,g,b)
 def get_average(image):
@@ -263,6 +257,12 @@ def get_images_info():
                 print(lab)
     joblib.dump(imagelist, "imagelist.jblib")
 
+
+# Load image megalist because 23,000 pictures takes a long time to download
+try:
+    imagelist = joblib.load("imagelist.jblib")
+except FileNotFoundError:
+    imagelist = {}
 
 playlists = [
     'https://open.spotify.com/playlist/2doesLfLSBsRFLcGfIUiPl?si=cmesMEI3RVm0P8uHa4JlIQ',
